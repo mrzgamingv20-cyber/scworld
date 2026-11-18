@@ -1,0 +1,15 @@
+{
+  "Name": "TdmCS",
+  "Version": "1.0.0",
+  "ApiVersion": "1.9",
+  "Description": "Counter-Strike style Team Deathmatch: teams T/CT, score, money, weapon shop (CS weapons mod), respawn and bot waves. Tap the copper (T) or marble (CT) shop block in a base. Works best in the ArenaCS arena.",
+  "ScVersion": "2.4.0.0",
+  "Link": "",
+  "Author": "MrzGaming",
+  "PackageName": "com.mrzgaming.tdmcs",
+  "LoadOrder": 2000,
+  "Dependencies": {
+    "zh667.ScCsgoKnives": "1.5.0",
+    "zh667.ScCsgoTactical": "1.5.0"
+  }
+}
