@@ -5,7 +5,6 @@ on:
   workflow_dispatch:
 
 env:
-  # Versi paket NuGet API game (dipakai kalau tidak ada Survivalcraft.dll di repo).
   SC_API_VERSION: "1.9.3.1"
 
 jobs:
@@ -19,6 +18,7 @@ jobs:
             needs_cs_mod: "false"
           - mod: TdmCS
             needs_cs_mod: "true"
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -28,43 +28,62 @@ jobs:
         with:
           dotnet-version: 10.0.x
 
-      - name: Check mod sources
+      - name: Check mod sources (Root)
         run: |
           set -e
-          test -d "${{ matrix.mod }}" || { echo "::error::Folder ${{ matrix.mod }} not found"; exit 1; }
-          ls "${{ matrix.mod }}"/*.cs >/dev/null 2>&1 || { echo "::error::No .cs file in ${{ matrix.mod }}"; exit 1; }
-          test -f "${{ matrix.mod }}/modinfo.json" || { echo "::error::${{ matrix.mod }}/modinfo.json missing"; exit 1; }
+          ls *.cs >/dev/null 2>&1 || {
+            echo "::error::No .cs files found in repository root"
+            exit 1
+          }
+          test -f modinfo.json || {
+            echo "::error::modinfo.json not found in repository root"
+            exit 1
+          }
 
       - name: Collect reference dlls
         run: |
           set -e
           REFS="$GITHUB_WORKSPACE/_refs"
           mkdir -p "$REFS"
-          SC=$(find . -type f -iname 'Survivalcraft.dll' -not -path './.git/*' -not -path './_*' | head -n1)
+
+          SC=$(find . -type f -iname 'Survivalcraft.dll' \
+            -not -path './.git/*' \
+            -not -path './_refs/*' \
+            | head -n1)
+
           if [ -n "$SC" ]; then
             cp "$(dirname "$SC")"/*.dll "$REFS/"
             echo "REF_MODE=local" >> "$GITHUB_ENV"
             echo "Using local game dlls from $(dirname "$SC")"
           else
             echo "REF_MODE=nuget" >> "$GITHUB_ENV"
-            echo "No Survivalcraft.dll in repo: will use NuGet package SurvivalcraftAPI.Survivalcraft $SC_API_VERSION"
+            echo "No Survivalcraft.dll found, using NuGet API"
           fi
+
           if [ "${{ matrix.needs_cs_mod }}" = "true" ]; then
             for f in ScCsgoKnives.dll ScCsgoTactical.dll; do
-              P=$(find . -type f -iname "$f" -not -path './.git/*' -not -path './_*' | head -n1)
+              P=$(find . -type f -iname "$f" \
+                -not -path './.git/*' \
+                -not -path './_refs/*' \
+                | head -n1)
+
               if [ -z "$P" ]; then
-                echo "::error::$f not found. Put ScCsgoKnives.dll and ScCsgoTactical.dll (from the CS weapons .scmod, which is a zip) into the libs/ folder."
+                echo "::error::$f not found in repository"
                 exit 1
               fi
+
               cp -n "$P" "$REFS/" || true
             done
           fi
-          echo "Reference dlls:"; ls -la "$REFS"
+
+          echo "Reference dlls:"
+          ls -la "$REFS"
 
       - name: Generate project file
         run: |
           set -e
           mkdir -p _build
+
           cat > _build/${{ matrix.mod }}.csproj <<'XML'
           <Project Sdk="Microsoft.NET.Sdk">
             <PropertyGroup>
@@ -72,7 +91,7 @@ jobs:
               <OutputType>Library</OutputType>
               <LangVersion>latest</LangVersion>
               <Nullable>disable</Nullable>
-              <ImplicitUsings>disable</ImplicitUsings>
+              <ImplicitUsings>disable</Implicitusings>
               <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
               <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
               <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
@@ -80,6 +99,7 @@ jobs:
               <NoWarn>$(NoWarn);CS0618;CS0649;CS0169;CS0414;CS1591;CS8981;NU1701</NoWarn>
               <DebugType>none</DebugType>
             </PropertyGroup>
+
             <ItemGroup>
               <Compile Include="$(SrcDir)/*.cs" />
               <GameDll Include="$(RefsDir)/*.dll" />
@@ -88,9 +108,11 @@ jobs:
             </ItemGroup>
           </Project>
           XML
+
           if [ "$REF_MODE" = "nuget" ]; then
             sed -i "s#<!--NUGET-->#<PackageReference Include=\"SurvivalcraftAPI.Survivalcraft\" Version=\"$SC_API_VERSION\"><PrivateAssets>all</PrivateAssets></PackageReference>#" _build/${{ matrix.mod }}.csproj
           fi
+
           cat _build/${{ matrix.mod }}.csproj
 
       - name: Build
@@ -98,7 +120,7 @@ jobs:
           set -e
           dotnet build _build/${{ matrix.mod }}.csproj -c Release \
             -p:AssemblyName=${{ matrix.mod }} \
-            -p:SrcDir="$GITHUB_WORKSPACE/${{ matrix.mod }}" \
+            -p:SrcDir="$GITHUB_WORKSPACE" \
             -p:RefsDir="$GITHUB_WORKSPACE/_refs" \
             -o _out
 
@@ -106,11 +128,23 @@ jobs:
         run: |
           set -e
           M="${{ matrix.mod }}"
-          test -f "_out/$M.dll" || { echo "::error::$M.dll not produced"; exit 1; }
+
+          test -f "_out/$M.dll" || {
+            echo "::error::$M.dll not produced"
+            exit 1
+          }
+
+          test -f "modinfo.json" || {
+            echo "::error::modinfo.json missing"
+            exit 1
+          }
+
           mkdir -p _pkg
           cp "_out/$M.dll" _pkg/
-          cp "$M/modinfo.json" _pkg/
+          cp "modinfo.json" _pkg/
+
           (cd _pkg && zip -r -9 "../$M.scmod" .)
+
           echo "Contents of $M.scmod:"
           unzip -l "$M.scmod"
 
